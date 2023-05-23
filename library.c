@@ -323,6 +323,7 @@ read_mbulk_header(RedisSock *redis_sock, int *nelem)
 PHP_REDIS_API int
 redis_check_eof(RedisSock *redis_sock, zend_bool no_retry, zend_bool no_throw)
 {
+    printf("redis_check_eof\n");
     unsigned int retry_index;
     char *errmsg;
 
@@ -3161,6 +3162,7 @@ PHP_REDIS_API int redis_sock_connect(RedisSock *redis_sock)
     }
     php_stream_set_option(redis_sock->stream,
         PHP_STREAM_OPTION_WRITE_BUFFER, PHP_STREAM_BUFFER_NONE, NULL);
+    php_stream_set_option(redis_sock->stream, PHP_STREAM_OPTION_BLOCKING, false, NULL);
 
     redis_sock->status = REDIS_SOCK_STATUS_CONNECTED;
 
@@ -4100,18 +4102,22 @@ redis_sock_gets(RedisSock *redis_sock, char *buf, int buf_size, size_t *line_siz
         return -1;
     }
 
-    if(redis_sock_get_line(redis_sock, buf, buf_size, line_size) == NULL) {
-        if (redis_sock->port < 0) {
-            snprintf(buf, buf_size, "read error on connection to %s", ZSTR_VAL(redis_sock->host));
-        } else {
-            snprintf(buf, buf_size, "read error on connection to %s:%d", ZSTR_VAL(redis_sock->host), redis_sock->port);
-        }
-        // Close our socket
-        redis_sock_disconnect(redis_sock, 1);
+    while (true) {
+        printf("loop: redis_sock_gets\n");
+        char ret = redis_sock_get_line(redis_sock, buf, buf_size, line_size);
+        if (*line_size > 0) {
+            if (ret == NULL) {
+                snprintf(buf, buf_size, "[bongo] read error on connection to %s:%d", ZSTR_VAL(redis_sock->host), redis_sock->port);
+                
+                // Close our socket
+                redis_sock_disconnect(redis_sock, 1);
 
-        // Throw a read error exception
-        REDIS_THROW_EXCEPTION(buf, 0);
-        return FAILURE;
+                // Throw a read error exception
+                REDIS_THROW_EXCEPTION(buf, 0);
+                return FAILURE;
+            }
+            break;
+        }
     }
 
     /* We don't need \r\n */
